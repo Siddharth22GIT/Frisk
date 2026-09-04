@@ -1,0 +1,255 @@
+openapi: "3.0.3"
+info:
+  title: Frisk API
+  description: |
+    AI Risk Manager for payment merchants.
+    Pass `X-API-Key: frisk-demo-key-2024` on all requests.
+  version: "1.0.0"
+
+servers:
+  - url: http://localhost:4000
+    description: Local development
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    Transaction:
+      type: object
+      properties:
+        transaction_id: { type: string, example: TXN00001 }
+        amount: { type: number, example: 249.99 }
+        merchant_category: { type: string, example: Electronics }
+        num_transactions_24h: { type: integer, example: 3 }
+        time_of_day: { type: integer, example: 14 }
+        is_international: { type: integer, enum: [0, 1], example: 0 }
+        device_type: { type: string, example: mobile }
+        customer_age_days: { type: integer, example: 365 }
+        prev_chargebacks: { type: integer, example: 0 }
+        fraud_label: { type: integer, nullable: true, example: null }
+        timestamp: { type: string, nullable: true }
+
+    FraudResult:
+      type: object
+      properties:
+        transaction_id: { type: string }
+        amount: { type: number }
+        risk_score: { type: integer, minimum: 0, maximum: 100 }
+        risk_tier: { type: string, enum: [Safe, "Review Needed", "High Risk"] }
+        flagged: { type: boolean }
+        anomaly_reasons: { type: array, items: { type: string } }
+        timestamp: { type: string }
+        merchant_category: { type: string }
+
+    FraudMetrics:
+      type: object
+      properties:
+        precision: { type: number }
+        recall: { type: number }
+        f1: { type: number }
+        fpr: { type: number }
+        source: { type: string }
+
+    OrderMetadata:
+      type: object
+      properties:
+        order_id: { type: string, example: ORD00001 }
+        product_category: { type: string, example: Electronics }
+        customer_return_rate: { type: number, example: 0.12 }
+        order_value: { type: number, example: 299.00 }
+        region: { type: string, example: "North America" }
+        days_since_last_order: { type: integer, example: 45 }
+        customer_age_days: { type: integer, example: 730 }
+        num_prev_orders: { type: integer, example: 12 }
+        is_gift: { type: integer, enum: [0, 1], example: 0 }
+        return_label: { type: integer, nullable: true }
+
+    ReturnsResult:
+      type: object
+      properties:
+        order_id: { type: string }
+        product_category: { type: string }
+        order_value: { type: number }
+        return_probability: { type: number }
+        risk_tier: { type: string, enum: [Low, Medium, High] }
+        recommended_action: { type: string }
+
+    ChargebackRequest:
+      type: object
+      required: [transaction_id, claim_text]
+      properties:
+        transaction_id: { type: string, example: TXN00123 }
+        claim_text: { type: string, example: "I never received this item." }
+        transaction_amount: { type: number, nullable: true }
+        transaction_date: { type: string, nullable: true }
+        merchant_name: { type: string, nullable: true }
+        customer_name: { type: string, nullable: true }
+        product_description: { type: string, nullable: true }
+
+    WebhookRegistration:
+      type: object
+      required: [merchantId, url]
+      properties:
+        merchantId: { type: string, example: merchant_001 }
+        url: { type: string, example: "https://your-site.com/webhooks/frisk" }
+
+paths:
+  /api/fraud/detect:
+    post:
+      summary: Batch fraud detection (CSV upload)
+      tags: [Fraud Detection]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Fraud detection results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions: { type: array, items: { $ref: "#/components/schemas/FraudResult" } }
+                  metrics: { $ref: "#/components/schemas/FraudMetrics" }
+                  summary: { type: object }
+
+  /api/fraud/detect/json:
+    post:
+      summary: Batch fraud detection (JSON body)
+      tags: [Fraud Detection]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: "#/components/schemas/Transaction" }
+      responses:
+        "200":
+          description: Fraud detection results
+
+  /api/fraud/demo:
+    get:
+      summary: Run fraud detection on demo dataset
+      tags: [Fraud Detection]
+      responses:
+        "200":
+          description: Demo fraud detection results
+
+  /api/returns/score:
+    post:
+      summary: Batch return risk scoring (CSV upload)
+      tags: [Return Risk]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200":
+          description: Return risk scoring results
+
+  /api/returns/score/json:
+    post:
+      summary: Single or batch return risk scoring (JSON body)
+      tags: [Return Risk]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: "#/components/schemas/OrderMetadata" }
+      responses:
+        "200":
+          description: Return risk scoring results
+
+  /api/returns/demo:
+    get:
+      summary: Run return risk scoring on demo dataset
+      tags: [Return Risk]
+      responses:
+        "200":
+          description: Demo return risk results
+
+  /api/chargebacks/respond:
+    post:
+      summary: Generate chargeback dispute evidence (Groq LLaMA-3)
+      tags: [Chargeback Responder]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChargebackRequest" }
+      responses:
+        "200":
+          description: Structured dispute evidence document
+
+  /api/webhooks/register:
+    post:
+      summary: Register a webhook URL for flagged result delivery
+      tags: [Webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookRegistration" }
+      responses:
+        "200":
+          description: Webhook registered successfully
+
+  /api/reports/export/csv:
+    get:
+      summary: Export results as CSV
+      tags: [Reports]
+      parameters:
+        - in: query
+          name: module
+          schema: { type: string, enum: [fraud, returns, chargebacks] }
+      responses:
+        "200":
+          description: CSV file download
+          content:
+            text/csv:
+              schema: { type: string }
+
+  /api/reports/export/pdf:
+    get:
+      summary: Export results as PDF report
+      tags: [Reports]
+      parameters:
+        - in: query
+          name: module
+          schema: { type: string, enum: [fraud, returns, chargebacks] }
+      responses:
+        "200":
+          description: PDF file download
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+
+  /health:
+    get:
+      summary: Service health check
+      tags: [System]
+      security: []
+      responses:
+        "200":
+          description: Service is healthy

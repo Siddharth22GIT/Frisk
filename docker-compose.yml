@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  ml-service:
+    build: ./ml-service
+    container_name: frisk-ml
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - FRISK_API_KEY=${FRISK_API_KEY:-frisk-demo-key-2024}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+    volumes:
+      - ml-artifacts:/app/model_artifacts
+      - ml-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: frisk-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - FRISK_API_KEY=${FRISK_API_KEY:-frisk-demo-key-2024}
+      - ML_SERVICE_URL=http://ml-service:8000
+      - NODE_ENV=production
+    depends_on:
+      ml-service:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frisk-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://backend:4000
+    depends_on:
+      - backend
+
+volumes:
+  ml-artifacts:
+  ml-data:
