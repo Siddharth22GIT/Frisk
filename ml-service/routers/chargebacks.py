@@ -17,7 +17,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+FALLBACK_MODELS = [
+    GROQ_MODEL,
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "groq/compound-mini",
+    "qwen/qwen3.8-27b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
 
 
 class ChargebackRequest(BaseModel):
@@ -71,21 +80,35 @@ Generate a comprehensive, professional chargeback dispute response. Return ONLY 
 Be specific, professional, and legally precise. Use payment industry terminology."""
 
 
-def _generate_with_groq(req: ChargebackRequest) -> dict:
-    try:
-        from groq import Groq
-        client = Groq(api_key=GROQ_API_KEY)
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": _build_prompt(req)}],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            max_tokens=2048,
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        logger.error(f"Groq API error: {e}")
-        raise HTTPException(status_code=502, detail=f"AI service error: {str(e)}")
+def _generate_with_groq(req: ChargebackRequest) -> tuple[dict, str]:
+    from groq import Groq
+    client = Groq(api_key=GROQ_API_KEY)
+    
+    # Deduplicate candidate models
+    candidates = []
+    for m in FALLBACK_MODELS:
+        if m and m not in candidates:
+            candidates.append(m)
+
+    last_error = None
+    for model_name in candidates:
+        try:
+            logger.info(f"Attempting Groq generation with model: {model_name}")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": _build_prompt(req)}],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+                max_tokens=2048,
+            )
+            parsed = json.loads(response.choices[0].message.content)
+            return parsed, model_name
+        except Exception as e:
+            logger.warning(f"Groq model {model_name} failed: {e}. Trying next fallback...")
+            last_error = e
+
+    logger.error(f"All Groq models failed. Last error: {last_error}")
+    raise HTTPException(status_code=502, detail=f"AI service error: {str(last_error)}")
 
 
 def _mock_response(req: ChargebackRequest) -> dict:
@@ -137,10 +160,11 @@ async def chargeback_respond(req: ChargebackRequest):
     if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
         logger.warning("No GROQ_API_KEY configured — returning mock response.")
         result = _mock_response(req)
+        model_used = "mock"
     else:
-        result = _generate_with_groq(req)
+        result, model_used = _generate_with_groq(req)
 
     result["transaction_id"] = req.transaction_id
     result["generated_at"] = datetime.utcnow().isoformat() + "Z"
-    result["model_used"] = GROQ_MODEL if GROQ_API_KEY else "mock"
+    result["model_used"] = model_used
     return JSONResponse(result)

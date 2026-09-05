@@ -125,7 +125,7 @@ export default function ChargebacksPage() {
           <span className="text-xs font-semibold text-violet-400 uppercase tracking-widest">Module 3</span>
         </div>
         <h1 className="text-3xl font-bold text-white">Chargeback Evidence Responder</h1>
-        <p className="text-slate-400 mt-1">Generate AI-powered dispute evidence using Groq LLaMA-3.3-70b.</p>
+        <p className="text-slate-400 mt-1">Generate AI-powered dispute evidence using Groq AI.</p>
       </div>
 
       <div className="grid grid-cols-3 gap-6">
@@ -313,7 +313,7 @@ export default function ChargebacksPage() {
           {loading && (
             <div className="card flex flex-col items-center justify-center py-20 gap-3">
               <Loader2 size={32} className="text-violet-400 animate-spin" />
-              <p className="text-slate-400 text-sm">LLaMA-3 is drafting your evidence document…</p>
+              <p className="text-slate-400 text-sm">Groq AI is drafting your evidence document…</p>
             </div>
           )}
         </div>
