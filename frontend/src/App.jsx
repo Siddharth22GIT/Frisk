@@ -8,9 +8,9 @@ import ReportsPage from "./pages/ReportsPage";
 
 export default function App() {
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-[#090807] light:bg-[#f7f4ef] text-[#f5efe6] light:text-[#181614] transition-colors duration-200">
       <Sidebar />
-      <main className="flex-1 ml-64 min-h-screen overflow-auto">
+      <main className="flex-1 ml-64 min-h-screen overflow-auto bg-[#090807] light:bg-[#f7f4ef] text-[#f5efe6] light:text-[#181614]">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/fraud" element={<FraudPage />} />

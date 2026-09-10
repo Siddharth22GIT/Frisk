@@ -20,6 +20,7 @@ const swaggerUi = require("swagger-ui-express");
 const rateLimit = require("express-rate-limit");
 
 const app = express();
+app.set("trust proxy", 1);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const ML_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
@@ -36,7 +37,13 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-const limiter = rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false });
+const limiter = rateLimit({
+  windowMs: 60_000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+});
 app.use(limiter);
 
 // ── Swagger ────────────────────────────────────────────────────────────────────

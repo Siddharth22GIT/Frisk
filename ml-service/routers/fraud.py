@@ -25,6 +25,85 @@ from models.train import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Default values used when a required column is absent from an uploaded CSV
+_COLUMN_DEFAULTS = {
+    "transaction_id": None,        # filled per-row below
+    "amount": 100.0,
+    "merchant_category": "General",
+    "num_transactions_24h": 3,
+    "time_of_day": 12,
+    "is_international": 0,
+    "device_type": "desktop",
+    "customer_age_days": 365,
+    "prev_chargebacks": 0,
+    "fraud_label": None,
+    "timestamp": "",
+}
+
+# Common column aliases from real-world CSV exports
+_COLUMN_ALIASES = {
+    # amount variants
+    "value": "amount",
+    "transaction_value": "amount",
+    "txn_amount": "amount",
+    "price": "amount",
+    "total": "amount",
+    # merchant_category variants
+    "category": "merchant_category",
+    "mcc": "merchant_category",
+    "merchant_type": "merchant_category",
+    # transaction_id variants
+    "txn_id": "transaction_id",
+    "txn_no": "transaction_id",
+    "id": "transaction_id",
+    "order_id": "transaction_id",
+    # device_type variants
+    "device": "device_type",
+    # time_of_day variants
+    "hour": "time_of_day",
+    "txn_hour": "time_of_day",
+    # is_international variants
+    "international": "is_international",
+    "is_foreign": "is_international",
+    # num_transactions_24h variants
+    "txn_count_24h": "num_transactions_24h",
+    "transactions_24h": "num_transactions_24h",
+    # customer_age_days variants
+    "account_age": "customer_age_days",
+    "customer_age": "customer_age_days",
+    # prev_chargebacks variants
+    "chargebacks": "prev_chargebacks",
+    "chargeback_count": "prev_chargebacks",
+}
+
+
+def _normalise_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalise an uploaded DataFrame to the schema the model expects.
+
+    - Strip whitespace from column names & lowercase them
+    - Apply known aliases so common real-world CSV headers are accepted
+    - Fill any still-missing required columns with sensible defaults
+    - Coerce numeric columns to the right dtype
+    """
+    # Normalise column names
+    df = df.copy()
+    df.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
+
+    # Apply aliases
+    df.rename(columns=_COLUMN_ALIASES, inplace=True)
+
+    # Fill missing columns with defaults
+    for col, default in _COLUMN_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
+
+    # Coerce numerics (ignore errors — they'll stay as-is and the model handles NaN)
+    for col in ("amount", "num_transactions_24h", "time_of_day",
+                "is_international", "customer_age_days", "prev_chargebacks"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(_COLUMN_DEFAULTS[col])
+
+    return df
+
 # ── Anomaly reason logic ───────────────────────────────────────────────────────
 
 def _anomaly_reasons(row: pd.Series) -> list[str]:
@@ -135,7 +214,12 @@ async def detect_fraud_csv(file: UploadFile = File(...)):
         df = pd.read_csv(io.BytesIO(content))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid CSV: {e}")
-    return JSONResponse(_run_detection(df))
+    try:
+        df = _normalise_df(df)
+        return JSONResponse(_run_detection(df))
+    except Exception as e:
+        logger.exception("Fraud detection failed")
+        raise HTTPException(status_code=500, detail=f"Detection error: {e}")
 
 
 @router.post("/detect/json")
@@ -143,13 +227,23 @@ async def detect_fraud_json(transactions: list[Transaction] = Body(...)):
     """Submit a JSON array of transactions for fraud detection."""
     if not transactions:
         raise HTTPException(status_code=400, detail="Empty transaction list.")
-    df = pd.DataFrame([t.model_dump() for t in transactions])
-    return JSONResponse(_run_detection(df))
+    try:
+        df = pd.DataFrame([t.model_dump() for t in transactions])
+        df = _normalise_df(df)
+        return JSONResponse(_run_detection(df))
+    except Exception as e:
+        logger.exception("Fraud detection (JSON) failed")
+        raise HTTPException(status_code=500, detail=f"Detection error: {e}")
 
 
 @router.get("/demo")
 async def demo_fraud():
     """Run detection on the seeded demo dataset (no upload needed)."""
-    from data.seed import TRANSACTIONS_PATH
-    df = pd.read_csv(TRANSACTIONS_PATH)
-    return JSONResponse(_run_detection(df))
+    try:
+        from data.seed import TRANSACTIONS_PATH
+        df = pd.read_csv(TRANSACTIONS_PATH)
+        df = _normalise_df(df)
+        return JSONResponse(_run_detection(df))
+    except Exception as e:
+        logger.exception("Demo fraud detection failed")
+        raise HTTPException(status_code=500, detail=f"Detection error: {e}")
